@@ -23,7 +23,8 @@ class ER:
 
     def sample(self):
         indices = np.random.randint(0, self.cur_size, size=self.batch_size)
-        return self.buffer[indices]
+        s, a, r, s_next, done = zip(*self.buffer[indices])
+        return np.stack(s), np.stack(a), np.stack(r), np.stack(s_next), np.stack(done)
 
 
 class Net(nn.Module):
@@ -90,20 +91,15 @@ class DQN_discrete:
 
     def train(self):
         if self.replay_buffer.cur_size > self.play_before_learn:
-            y = []
-            train_batch = self.replay_buffer.sample()
-            s = np.stack(train_batch[:, 0])
+            s, a, r, s_next, done = self.replay_buffer.sample()
             s = torch.from_numpy(s).float().to(config['device'])
-            a = np.stack(train_batch[:, 1])
-            a = torch.LongTensor(a).to(config['device'])
-            s_next = np.stack(train_batch[:, 3])
+            a = torch.from_numpy(a).long().to(config['device'])
+            r = torch.from_numpy(r).float().to(config['device'])
             s_next = torch.from_numpy(s_next).float().to(config['device'])
+            done = torch.from_numpy(done).float().to(config['device'])
             with torch.no_grad():
                 s_next_pred = self.net(s_next).cpu().numpy()
-            for ind, (_, _, r, _, done) in enumerate(train_batch):
-                y.append(r if done else r + self.gamma * np.max(s_next_pred[ind]))
-
-            y = torch.from_numpy(np.array(y)).float()
+            y = r + self.gamma * np.max(s_next_pred) * (1 - done)
             pred = self.net(s).gather(1, a.unsqueeze(1))
 
             self.optimizer.zero_grad()
