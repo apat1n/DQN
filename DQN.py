@@ -29,14 +29,18 @@ class ER:
 class Net(nn.Module):
     def __init__(self, in_dim: int, out_dim: int):
         super(Net, self).__init__()
-        self.linear1 = nn.Linear(in_dim, 32)
-        self.linear2 = nn.Linear(32, 32)
-        self.linear3 = nn.Linear(32, out_dim)
+        self.linear1 = nn.Linear(in_dim, 128)
+        self.linear2 = nn.Linear(128, 128)
+        self.linear3 = nn.Linear(128, out_dim)
+        # xavier init
+        torch.nn.init.xavier_uniform_(self.linear1.weight)
+        torch.nn.init.xavier_uniform_(self.linear2.weight)
+        torch.nn.init.xavier_uniform_(self.linear3.weight)
 
     def forward(self, x: torch.FloatTensor):
         x = F.relu(self.linear1(x))
         x = F.relu(self.linear2(x))
-        x = self.linear3(x)
+        x = F.relu(self.linear3(x))
         return x
 
 
@@ -44,7 +48,9 @@ class DQN_discrete:
     def __init__(self,
                  n_state: int,
                  n_action: int,
-                 eps: float = 0.05,
+                 eps_start: float = 1.0,
+                 eps_final: float = 0.01,
+                 eps_decay: int = 500,
                  gamma: float = 0.999,
                  er_batch_size: int = 32,
                  er_max_size: int = 10000,
@@ -56,17 +62,24 @@ class DQN_discrete:
         self.play_before_learn = play_before_learn
         self.action_space = range(n_action)
         self.gamma = gamma
-        self.eps = eps
+        self.eps_start = eps_start
+        self.eps_final = eps_final
+        self.eps_decay = eps_decay
+        self.frame_ind = 0
+
+    def get_eps(self):
+        return self.eps_final + (self.eps_start - self.eps_final) * np.exp(-1. * self.frame_ind / self.eps_decay)
 
     def act(self, state: np.ndarray):
         if self.replay_buffer.cur_size > self.play_before_learn:
-            if np.random.rand() <= self.eps:
+            if np.random.rand() <= self.get_eps():
                 action = np.random.choice(self.action_space)
             else:
                 state = torch.from_numpy(state).float().to(config['device'])
                 with torch.no_grad():
                     values = self.net(state).cpu().numpy()
                 action = np.argmax(values)
+            self.frame_ind += 1
         else:
             # if experience replay buffer isn't fill make random action
             action = np.random.choice(self.action_space)
