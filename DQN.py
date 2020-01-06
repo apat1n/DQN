@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
+import random
 from Config import config
 from Logger import writer
 from typing import Tuple, Union
@@ -22,7 +23,7 @@ class ER:
         self.cur_size = max(self.cur_size, self.cur_ind)
 
     def sample(self):
-        indices = np.random.randint(0, self.cur_size, size=self.batch_size)
+        indices = random.sample(range(0, self.cur_size), self.batch_size)
         s, a, r, s_next, done = zip(*self.buffer[indices])
         return np.stack(s), np.stack(a), np.stack(r), np.stack(s_next), np.stack(done)
 
@@ -30,9 +31,9 @@ class ER:
 class Net(nn.Module):
     def __init__(self, in_dim: int, out_dim: int):
         super(Net, self).__init__()
-        self.linear1 = nn.Linear(in_dim, 128)
-        self.linear2 = nn.Linear(128, 128)
-        self.linear3 = nn.Linear(128, out_dim)
+        self.linear1 = nn.Linear(in_dim, 32)
+        self.linear2 = nn.Linear(32, 32)
+        self.linear3 = nn.Linear(32, out_dim)
         # xavier init
         torch.nn.init.xavier_uniform_(self.linear1.weight)
         torch.nn.init.xavier_uniform_(self.linear2.weight)
@@ -52,11 +53,11 @@ class DQN_discrete:
                  eps_start: float = 1.0,
                  eps_final: float = 0.01,
                  eps_decay: int = 500,
-                 gamma: float = 0.999,
+                 gamma: float = 0.99,
                  er_batch_size: int = 32,
-                 er_max_size: int = 10000,
-                 play_before_learn: int = 1000):
-        assert er_max_size > play_before_learn, "Need larger ER buffer max_size"
+                 er_max_size: int = 1000,
+                 play_before_learn: int = 32):
+        assert er_max_size > play_before_learn >= er_batch_size, "Need larger ER buffer max_size"
         self.net = Net(n_state, n_action).to(config['device'])
         self.optimizer = torch.optim.Adam(self.net.parameters())
         self.replay_buffer = ER(er_max_size, er_batch_size)
@@ -98,14 +99,12 @@ class DQN_discrete:
             s_next = torch.from_numpy(s_next).float().to(config['device'])
             done = torch.from_numpy(done).float().to(config['device'])
             with torch.no_grad():
-                s_next_pred = self.net(s_next).cpu().numpy()
-            y = r + self.gamma * np.max(s_next_pred) * (1 - done)
-            pred = self.net(s).gather(1, a.unsqueeze(1))
+                s_next_pred = self.net(s_next).max(1)[0]
+            y = r + self.gamma * s_next_pred * (1 - done)
+            pred = self.net(s).gather(1, a.unsqueeze(1)).squeeze(1)
+            loss = torch.sum((y - pred) ** 2)
+            writer.add_scalar('Loss', loss.detach().cpu().numpy(), self.frame_ind)
 
             self.optimizer.zero_grad()
-            loss = torch.sum((y - pred) ** 2)
             loss.backward()
-            writer.add_scalar('Loss', loss.detach().cpu().numpy())
-            for param in self.net.parameters():
-                param.grad.data.clamp_(-1, 1)
             self.optimizer.step()
