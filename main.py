@@ -1,20 +1,25 @@
 import gym
-import math
 from Logger import writer
-from DQN import DQN_discrete
+from DQN_target import DQN
 
 if __name__ == '__main__':
-    env = gym.make('CartPole-v0')
-    agent = DQN_discrete(env.observation_space.shape[0], env.action_space.n)
+    env = gym.make('MountainCar-v0')
+    agent = DQN(
+        env.observation_space.shape[0],
+        env.action_space.n,
+        writer=writer
+    )
 
-    for episode in range(500):
+    for episode in range(100):
         tot_reward = 0
         state = env.reset()
         while True:
             action = agent.act(state)
             new_state, reward, done, _ = env.step(action)
 
-            agent.append((state, action, reward, new_state, done))
+            # let's use reward shaping
+            modified_reward = reward + 300 * (0.99 * abs(new_state[1]) - abs(state[1]))
+            agent.append((state, action, modified_reward, new_state, done))
             agent.train()
 
             state = new_state

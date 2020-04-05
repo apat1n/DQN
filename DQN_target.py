@@ -30,9 +30,9 @@ class ER:
 class Net(nn.Module):
     def __init__(self, in_dim: int, out_dim: int):
         super(Net, self).__init__()
-        self.linear1 = nn.Linear(in_dim, 32)
-        self.linear2 = nn.Linear(32, 32)
-        self.linear3 = nn.Linear(32, out_dim)
+        self.linear1 = nn.Linear(in_dim, 64)
+        self.linear2 = nn.Linear(64, 64)
+        self.linear3 = nn.Linear(64, out_dim)
         # xavier init
         torch.nn.init.xavier_uniform_(self.linear1.weight)
         torch.nn.init.xavier_uniform_(self.linear2.weight)
@@ -54,11 +54,15 @@ class DQN:
                  eps_final: float = 0.001,
                  eps_decay: int = 2000,
                  gamma: float = 0.99,
-                 er_batch_size: int = 64,
+                 er_batch_size: int = 128,
                  er_max_size: int = 10000,
-                 play_before_learn: int = 64):
-        assert er_max_size > play_before_learn >= er_batch_size, "Need larger ER buffer max_size"
+                 target_freq: int = 2000,
+                 play_before_learn: int = 128):
+        assert er_max_size > play_before_learn >= er_batch_size, \
+            "Need larger ER buffer max_size"
         self.net = Net(n_state, n_action).to(config['device'])
+        self.target_net = Net(n_state, n_action).to(config['device'])
+        self.target_net.load_state_dict(self.net.state_dict())
         self.optimizer = torch.optim.Adam(self.net.parameters())
         self.replay_buffer = ER(er_max_size, er_batch_size)
         self.play_before_learn = play_before_learn
@@ -67,6 +71,7 @@ class DQN:
         self.eps_start = eps_start
         self.eps_final = eps_final
         self.eps_decay = eps_decay
+        self.target_freq = target_freq
         self.writer = writer
         self.frame_ind = 0
 
@@ -93,6 +98,9 @@ class DQN:
 
     def train(self):
         if self.replay_buffer.cur_size > self.play_before_learn:
+            if self.frame_ind % self.target_freq == 0:
+                self.target_net.load_state_dict(self.net.state_dict())
+
             s, a, r, s_next, done = self.replay_buffer.sample()
             s = torch.from_numpy(s).float().to(config['device'])
             a = torch.from_numpy(a).long().to(config['device'])
@@ -100,11 +108,13 @@ class DQN:
             s_next = torch.from_numpy(s_next).float().to(config['device'])
             done = torch.from_numpy(done).float().to(config['device'])
             with torch.no_grad():
-                s_next_pred = self.net(s_next).max(1)[0]
+                s_next_pred = self.target_net(s_next).max(1)[0]
             y = r + self.gamma * s_next_pred * (1 - done)
             pred = self.net(s).gather(1, a.unsqueeze(1)).squeeze(1)
             loss = torch.sum((y - pred) ** 2)
-            self.writer.add_scalar('Loss', loss.detach().cpu().numpy(), self.frame_ind)
+
+            if self.writer is not None:
+                self.writer.add_scalar('Loss', loss.detach().cpu().numpy(), self.frame_ind)
 
             self.optimizer.zero_grad()
             loss.backward()

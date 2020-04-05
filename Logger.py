@@ -1,3 +1,3 @@
 from torch.utils.tensorboard import SummaryWriter
 
-writer = SummaryWriter()
+writer = SummaryWriter('runs/MountainCar-v0')
